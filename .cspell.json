@@ -22,6 +22,10 @@
     "serde",
     "rustc",
     "uadd",
-    "xffff"
+    "xffff",
+    "HMAC",
+    "hmac",
+    "libquery",
+    "psql"
   ]
 }

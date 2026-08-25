@@ -1446,4 +1446,229 @@ mod test {
         assert_eq!(token_client.balance(&treasury), 1_000);
         assert_eq!(token_client.balance(&recipient), 0);
     }
+
+    // ── Additional coverage tests for #522 ──────────────────────────────────
+
+    /// `set_platform_treasury` updates the stored treasury and subsequent
+    /// payments route fees to the new address.
+    #[test]
+    fn test_set_platform_treasury_updates_fee_destination() {
+        let (env, client, _) = setup_env();
+        let admin = Address::generate(&env);
+        let old_treasury = Address::generate(&env);
+        let new_treasury = Address::generate(&env);
+        let sender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let (token_address, token_client, sac) = setup_token(&env);
+        sac.mint(&sender, &10_000);
+
+        // 1% fee, cap 50
+        client.initialize(&admin, &old_treasury, &100, &50, &PaymentRouter::MAX_AMOUNT);
+
+        // Route once — fee goes to old_treasury
+        client.route_payment(&sender, &recipient, &token_address, &1_000);
+        assert_eq!(token_client.balance(&old_treasury), 10);
+        assert_eq!(token_client.balance(&new_treasury), 0);
+
+        // Swap treasury
+        client.set_platform_treasury(&new_treasury);
+
+        // Route again — fee now goes to new_treasury
+        client.route_payment(&sender, &recipient, &token_address, &1_000);
+        assert_eq!(token_client.balance(&old_treasury), 10);  // unchanged
+        assert_eq!(token_client.balance(&new_treasury), 10);  // received fee
+    }
+
+    /// `set_platform_treasury` before `initialize` returns `NotInitialized`.
+    #[test]
+    fn test_set_platform_treasury_not_initialized() {
+        let (env, client, _) = setup_env();
+        let new_treasury = Address::generate(&env);
+
+        let res = client.try_set_platform_treasury(&new_treasury);
+        assert_eq!(res.unwrap_err().unwrap(), Error::NotInitialized);
+    }
+
+    /// `set_fee_bps` before `initialize` returns `NotInitialized`.
+    #[test]
+    fn test_set_fee_bps_not_initialized() {
+        let (env, client, _) = setup_env();
+        let res = client.try_set_fee_bps(&200);
+        assert_eq!(res.unwrap_err().unwrap(), Error::NotInitialized);
+    }
+
+    /// `set_fee_config_legacy` before `initialize` returns `NotInitialized`.
+    #[test]
+    fn test_set_fee_config_legacy_not_initialized() {
+        let (env, client, _) = setup_env();
+        let res = client.try_set_fee_config_legacy(&200, &500);
+        assert_eq!(res.unwrap_err().unwrap(), Error::NotInitialized);
+    }
+
+    /// `set_pause` before `initialize` returns `NotInitialized`.
+    #[test]
+    fn test_set_pause_not_initialized() {
+        let (env, client, _) = setup_env();
+        let res = client.try_set_pause(&true);
+        assert_eq!(res.unwrap_err().unwrap(), Error::NotInitialized);
+    }
+
+    /// `blacklist_address` before `initialize` returns `NotInitialized`.
+    #[test]
+    fn test_blacklist_not_initialized() {
+        let (env, client, _) = setup_env();
+        let addr = Address::generate(&env);
+        let res = client.try_blacklist_address(&addr);
+        assert_eq!(res.unwrap_err().unwrap(), Error::NotInitialized);
+    }
+
+    /// `unblacklist_address` before `initialize` returns `NotInitialized`.
+    #[test]
+    fn test_unblacklist_not_initialized() {
+        let (env, client, _) = setup_env();
+        let addr = Address::generate(&env);
+        let res = client.try_unblacklist_address(&addr);
+        assert_eq!(res.unwrap_err().unwrap(), Error::NotInitialized);
+    }
+
+    /// `recover_tokens` before `initialize` returns `NotInitialized`.
+    #[test]
+    fn test_recover_tokens_not_initialized() {
+        let (env, client, _) = setup_env();
+        let (token_address, _tc, _sac) = setup_token(&env);
+        let res = client.try_recover_tokens(&token_address, &100);
+        assert_eq!(res.unwrap_err().unwrap(), Error::NotInitialized);
+    }
+
+    /// `emergency_withdraw` before `initialize` returns `NotInitialized`.
+    #[test]
+    fn test_emergency_withdraw_not_initialized() {
+        let (env, client, _) = setup_env();
+        let (token_address, _tc, _sac) = setup_token(&env);
+        let res = client.try_emergency_withdraw(&token_address, &100);
+        assert_eq!(res.unwrap_err().unwrap(), Error::NotInitialized);
+    }
+
+    /// `is_paused` returns `false` on a freshly initialized contract.
+    #[test]
+    fn test_is_paused_initially_false() {
+        let (env, client, _) = setup_env();
+        let admin = Address::generate(&env);
+        let treasury = Address::generate(&env);
+        client.initialize(&admin, &treasury, &100, &50, &PaymentRouter::MAX_AMOUNT);
+        assert_eq!(client.is_paused(), false);
+    }
+
+    /// `is_paused` returns `false` before `initialize` (storage defaults to false).
+    #[test]
+    fn test_is_paused_before_initialize() {
+        let (_env, client, _) = setup_env();
+        assert_eq!(client.is_paused(), false);
+    }
+
+    /// `set_admin` on an uninitialised contract sets the admin without
+    /// requiring existing-admin auth (no admin exists yet).
+    #[test]
+    fn test_set_admin_when_uninitialized() {
+        let (env, client, contract_addr) = setup_env();
+        let new_admin = Address::generate(&env);
+
+        // No existing admin — set_admin should succeed
+        client.set_admin(&new_admin);
+
+        let stored: Option<Address> = env.as_contract(&contract_addr, || {
+            env.storage().instance().get(&DataKey::Admin)
+        });
+        assert_eq!(stored, Some(new_admin));
+    }
+
+    /// `set_fee_config` (alias) delegates to `set_fee_config_legacy` and the
+    /// updated fee is reflected by `get_fee`.
+    #[test]
+    fn test_set_fee_config_alias() {
+        let (env, client, _) = setup_env();
+        let admin = Address::generate(&env);
+        let treasury = Address::generate(&env);
+
+        client.initialize(&admin, &treasury, &100, &500, &PaymentRouter::MAX_AMOUNT);
+        client.set_fee_config(&250, &1_000);
+        assert_eq!(client.get_fee(), 250);
+    }
+
+    /// `get_fee` returns 0 before `initialize` (no FeeBps in storage).
+    #[test]
+    fn test_get_fee_before_initialize() {
+        let (_env, client, _) = setup_env();
+        assert_eq!(client.get_fee(), 0);
+    }
+
+    /// `route_payments` with an empty batch succeeds without error.
+    #[test]
+    fn test_route_payments_empty_batch() {
+        let (env, client, _) = setup_env();
+        let admin = Address::generate(&env);
+        let treasury = Address::generate(&env);
+        client.initialize(&admin, &treasury, &100, &50, &PaymentRouter::MAX_AMOUNT);
+
+        let payments: soroban_sdk::Vec<Payment> = soroban_sdk::vec![&env];
+        client.route_payments(&payments);
+    }
+
+    /// Zero-amount payment via `route_payments` batch is rejected.
+    #[test]
+    fn test_route_payments_zero_amount_rejected() {
+        let (env, client, _) = setup_env();
+        let admin = Address::generate(&env);
+        let treasury = Address::generate(&env);
+        let sender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let (token_address, _tc, sac) = setup_token(&env);
+        sac.mint(&sender, &10_000);
+
+        client.initialize(&admin, &treasury, &100, &50, &PaymentRouter::MAX_AMOUNT);
+
+        let payments = soroban_sdk::vec![
+            &env,
+            Payment {
+                sender: sender.clone(),
+                recipient: recipient.clone(),
+                token_address: token_address.clone(),
+                amount: 0,
+            },
+        ];
+        let res = client.try_route_payments(&payments);
+        assert_eq!(res.unwrap_err().unwrap(), Error::LimitExceeded);
+    }
+
+    /// `route_payments` before `initialize` returns `NotInitialized`.
+    #[test]
+    fn test_route_payments_not_initialized() {
+        let (env, client, _) = setup_env();
+        let sender = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let (token_address, _tc, sac) = setup_token(&env);
+        sac.mint(&sender, &10_000);
+
+        let payments = soroban_sdk::vec![
+            &env,
+            Payment {
+                sender: sender.clone(),
+                recipient: recipient.clone(),
+                token_address: token_address.clone(),
+                amount: 1_000,
+            },
+        ];
+        let res = client.try_route_payments(&payments);
+        assert_eq!(res.unwrap_err().unwrap(), Error::NotInitialized);
+    }
+
+    /// `add_supported_token` before `initialize` still returns `Ok(())` — it is
+    /// a no-op that does not read admin storage.
+    #[test]
+    fn test_add_supported_token_no_init_needed() {
+        let (env, client, _) = setup_env();
+        let (token_address, _tc, _sac) = setup_token(&env);
+        // Should not panic — add_supported_token is always Ok
+        client.add_supported_token(&token_address);
+    }
 }

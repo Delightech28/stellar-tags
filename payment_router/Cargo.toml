@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
-crate-type = ["cdylib"]
+# cdylib produces the .wasm for on-chain deployment; rlib is required by
+# cargo test / cargo tarpaulin so the test harness can link the crate.
+crate-type = ["cdylib", "rlib"]
 
 [features]
 testutils = ["soroban-sdk/testutils"]
